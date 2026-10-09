@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
-# vi: from fusion_lab.workspace_support import get_tracking_params
-# vi: import numpy as np
+import numpy as np
+
+from fusion_lab.workspace_support import get_tracking_params
 
 
 def init_track_state_from_meas(meas: Any) -> dict[str, Any]:
@@ -21,9 +22,33 @@ def init_track_state_from_meas(meas: Any) -> dict[str, Any]:
     Returns:
         Dict with keys ``x``, ``P``, ``state``, ``score`` (matrices as ``np.matrix``).
     """
-    # vi: TODO Part H — đổi meas.z sang vehicle frame; x = [pos; 0 velocity];
-    # vi: P block pos từ R xoay, vel từ sigma_p44/55/66; score = 1/window; state initialized.
-    raise NotImplementedError("TODO: implement init_track_state_from_meas")
+    params = get_tracking_params()
+
+    # Transform measurement position from sensor to vehicle frame
+    # meas.z is in sensor frame (3x1), need to transform using sensor's sens_to_veh
+    z_sensor = np.asarray(meas.z, dtype=float).reshape(-1)[:3]  # [x, y, z] in sensor frame
+    transform = np.asarray(meas.sensor.sens_to_veh)
+    z_vehicle = transform[:3, :3] @ z_sensor + transform[:3, 3]
+
+    # State vector: position + zero velocity
+    x = np.asmatrix(np.r_[z_vehicle, [0.0, 0.0, 0.0]]).T
+
+    # Covariance matrix
+    # Position block from rotated R
+    R_rot = transform[:3, :3] @ np.asarray(meas.R) @ transform[:3, :3].T
+    # Velocity block from sigma_p44, sigma_p55, sigma_p66
+    P_vel = np.diag([params.sigma_p44**2, params.sigma_p55**2, params.sigma_p66**2])
+
+    P = np.asmatrix(np.block([
+        [R_rot, np.zeros((3, 3))],
+        [np.zeros((3, 3)), P_vel]
+    ]))
+
+    # Initial score and state
+    score = 1.0 / params.window
+    state = "initialized"
+
+    return {"x": x, "P": P, "state": state, "score": score}
 
 
 def update_track_score(track: dict[str, Any], associated: bool) -> dict[str, Any]:
@@ -39,10 +64,34 @@ def update_track_score(track: dict[str, Any], associated: bool) -> dict[str, Any
     Returns:
         Updated track dict.
     """
-    # vi: TODO Part H — chỉ lidar: hit +1/window (tối đa 1), miss trong FOV -1/window.
-    # vi: score > confirmed_threshold → confirmed; đã confirmed không hạ trạng thái.
-    # vi: Camera không gọi hàm này; track chưa confirmed với hit → tentative.
-    raise NotImplementedError("TODO: implement update_track_score")
+    params = get_tracking_params()
+
+    score = track["score"]
+    state = track["state"]
+
+    if associated:
+        # Hit: add 1/window, cap at 1
+        score = min(score + 1.0 / params.window, 1.0)
+    else:
+        # Miss in FOV: subtract 1/window
+        score = score - 1.0 / params.window
+
+    # State transitions
+    if state == "confirmed":
+        # Confirmed tracks stay confirmed even after misses
+        pass
+    elif score > params.confirmed_threshold:
+        state = "confirmed"
+    elif associated:
+        # Hit but not yet confirmed
+        state = "tentative"
+    else:
+        # Miss and not confirmed
+        state = "tentative"
+
+    track["score"] = score
+    track["state"] = state
+    return track
 
 
 def should_delete_track(track: dict[str, Any]) -> bool:
@@ -58,7 +107,22 @@ def should_delete_track(track: dict[str, Any]) -> bool:
     Returns:
         True if track should be removed.
     """
-    # vi: TODO Part H — Pxx hoặc Pyy > max_P: xóa bất kể score.
-    # vi: confirmed: xóa khi score < delete_threshold; chưa confirmed: score <= 0.
-    # vi: Các điều kiện là OR; camera không đánh giá/xóa track.
-    raise NotImplementedError("TODO: implement should_delete_track")
+    params = get_tracking_params()
+
+    P = np.asarray(track["P"])
+    score = track["score"]
+    state = track["state"]
+
+    # Check horizontal position variance (P[0,0] = Pxx, P[1,1] = Pyy)
+    if P[0, 0] > params.max_P or P[1, 1] > params.max_P:
+        return True
+
+    if state == "confirmed":
+        if score < params.delete_threshold:
+            return True
+    else:
+        # Unconfirmed (initialized or tentative)
+        if score <= 0:
+            return True
+
+    return False
