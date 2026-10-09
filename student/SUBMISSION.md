@@ -8,7 +8,7 @@
 - MSSV: 2A202602665
 - Email: letuanhung2a202602665@student.edu.vn
 - Link repo (fork): https://github.com/LeTuanHung/K4-L2L3-DAY23-LeTuanHung-2A202602665-SensorFusion
-- Commit hash nộp (`git rev-parse HEAD`): 8c945542c840f2ffcc66c0ef5872b59d558f846b
+- Commit hash nộp (`git rev-parse HEAD`): 78b4572b9555af42267c1e6792238190fb05e540
 
 ## Tóm tắt kết quả
 
